@@ -1,6 +1,7 @@
 const venom = require("venom-bot");
 const fs = require("fs");
-const fsPromises = require("fs/promises");
+const csv = require("csv-parser");
+const fastcsv = require("fast-csv");
 
 venom
   .create({
@@ -14,51 +15,54 @@ venom
 function start(client) {
   client.onMessage(async (msg) => {
     if (msg.type === "chat" && msg.body.startsWith("!testar ")) {
-      console.log(msg.body);
-      const args = msg.body.slice(8).split(" ");
-      let dataFile = [];
-      fs.writeFileSync("numbers.json", JSON.stringify(dataFile));
-      for (const arg of args) {
-        await client
-          .checkNumberStatus(arg + "@c.us")
-          .then(async (result) => {
-            const resultStatus = result.status;
-            const resultExist = result.numberExists;
-            const resultIdUser = result.id.user;
-            console.log(
-              JSON.stringify(
-                "Status: " +
-                  resultStatus +
-                  " Exist: " +
-                  resultExist +
-                  "Id: " +
-                  resultIdUser
-              )
-            );
-            async function readwriteFileJson() {
-              var data = fs.readFileSync("numbers.json");
-              var myObject = JSON.parse(data);
-              let newData = {
-                resultStatus: resultStatus,
-                resultExist: resultExist,
-                resultIdUser: resultIdUser,
-              };
-              await myObject.push(newData);
-              await fsPromises.writeFile(
-                "numbers.json",
-                JSON.stringify(myObject),
-                (err) => {
-                  if (err) throw err;
-                }
-              );
-              console.log("Deu certo");
-            }
-            await readwriteFileJson();
-          })
-          .catch((erro) => {
-            console.log(erro);
-          });
+      const fileName = msg.body.slice(8).trim();
+      const phoneNumbers = await readCSV(fileName);
+
+      let results = [];
+      let id = 1;
+
+      for (const phoneNumber of phoneNumbers) {
+        const result = await checkNumber(client, phoneNumber);
+        if (result) {
+          results.push({ Id: id, 'Recipient-Phone-Number': phoneNumber });
+          id++;
+        }
       }
+
+      // Salvando os resultados em um arquivo CSV
+      saveToCSV(results);
     }
   });
+}
+
+async function readCSV(fileName) {
+  return new Promise((resolve, reject) => {
+    let phoneNumbers = [];
+    fs.createReadStream(fileName)
+      .pipe(csv())
+      .on("data", (row) => {
+        phoneNumbers.push(row["Recipient-Phone-Number"]);
+      })
+      .on("end", () => {
+        resolve(phoneNumbers);
+      });
+  });
+}
+
+async function checkNumber(client, phoneNumber) {
+  try {
+    const result = await client.checkNumberStatus(phoneNumber + "@c.us");
+    console.log(phoneNumber + " deu certo");
+    return result.status === 200; // ou qualquer condição que determine um número válido
+  } catch (error) {
+    console.log(phoneNumber + " deu erro");
+    return false;
+  }
+}
+
+function saveToCSV(data) {
+  const ws = fs.createWriteStream("result.csv");
+  fastcsv
+    .write(data, { headers: true })
+    .pipe(ws);
 }
